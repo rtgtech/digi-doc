@@ -1,5 +1,11 @@
 venv
 
+data 
+
+chroma-db
+
+.github
+
 doc.md
 
 temp.py
