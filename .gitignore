@@ -2,10 +2,12 @@ venv
 
 data 
 
-chroma-db
+APP_DATA
 
-.github
+.env
 
-doc.md
+digidoc-ppt.pptx
+
+__pycache__
 
 temp.py
