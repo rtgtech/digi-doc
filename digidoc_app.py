@@ -4,6 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from langchain_ollama import OllamaLLM
+from PIL import Image
+from contextlib import asynccontextmanager
 import asyncio
 import os
 from pathlib import Path
@@ -18,7 +20,7 @@ import os;
 
 load_dotenv()
 # Hardcoded Gemini credentials (edit these values in-code)
-client = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
+client : genai.Client | None = None
 # Optional media processing libs
 try:
     import fitz  # PyMuPDF
@@ -35,18 +37,53 @@ try:
 except Exception:
     pytesseract = None
 
-app = FastAPI(title="Digital Doctor API", version="1.1.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- 🌟 Startup Code 🌟 ---
+    print("Application Startup: Initializing Gemini Client...")
+    
+    global client
+    try:
+        # Initialize the client. It's safe to call Client() here, 
+        # as the context manager will handle the shutdown.
+        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY")) 
+        print("Gemini client initialized successfully.")
+    except Exception as e:
+        # Handle cases where the client can't be initialized (e.g., missing API key)
+        print(f"ERROR: Could not initialize Gemini client: {e}")
+        # In a real app, you might want to raise an exception here to halt startup.
+        
+    # Yield control to the application to handle requests
+    yield
+
+    # --- 🛑 Shutdown Code (Executed when Ctrl+C is pressed) 🛑 ---
+    print("\nApplication Shutdown: Closing Gemini Client...") 
+
+    if client:
+        try:
+            # The client's .close() method should be called for a clean shutdown.
+            # It's a synchronous call, so no 'await' is needed.
+            client.close()
+            print("Gemini client connection closed gracefully.")
+        except Exception as e:
+            print(f"Warning: Failed to close Gemini client cleanly: {e}")
+    else:
+        print("Gemini client was not initialized, skipping close.")
+    
+    print("All cleanup complete. Application is shutting down.")
+
+app = FastAPI(title="Digital Doctor API", version="1.1.0",lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[""],  # You can restrict this later, e.g. ["http://localhost:3000"]
+    allow_origins=["*"],  # You can restrict this later, e.g. ["http://localhost:3000"]
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Initialize Ollama model once
-model = OllamaLLM(model="llama3.2:3b")
+model = OllamaLLM(model="gemma3:1b")
 
 # APP_DATA directory setup
 APP_DATA_DIR = Path("APP_DATA")
@@ -131,7 +168,7 @@ async def sse_token_stream(text: str):
             yield "\n\n"
         else:
             buff.append(ch)
-        await asyncio.sleep(0.01)
+        await asyncio.sleep(0.005)
 
     if buff:
         yield f"{''.join(buff)} "
@@ -155,40 +192,6 @@ def stream_sse(request: QueryRequest):
     return StreamingResponse(sse_token_stream(huge_markdown_output),
                              media_type="text/plain")
 
-
-@app.post("/upload")
-async def upload_media(chat_id: str = "", file: UploadFile = File(...)):
-    """
-    Upload media files to APP_DATA/{chat_id}/ directory
-    """
-    if not chat_id:
-        raise HTTPException(status_code=400, detail="Chat ID is required.")
-    
-    try:
-        # Create chat-specific directory if it doesn't exist
-        chat_dir = APP_DATA_DIR / chat_id
-        chat_dir.mkdir(exist_ok=True)
-        
-        # Create media subdirectory
-        media_dir = chat_dir / "media"
-        media_dir.mkdir(exist_ok=True)
-        
-        # Save file with original filename
-        file_path = media_dir / file.filename
-        
-        with open(file_path, "wb") as buffer:
-            contents = await file.read()
-            buffer.write(contents)
-        
-        return {
-            "status": "success",
-            "message": f"File {file.filename} uploaded successfully",
-            "file_path": str(file_path),
-            "chat_id": chat_id,
-            "filename": file.filename
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to upload file: {str(e)}")
 
 
 @app.post("/save-message")
@@ -312,6 +315,8 @@ async def process_image(chat_id: str = Form(...), file: UploadFile = File(...), 
     if not lower.endswith(allowed_ext):
         raise HTTPException(status_code=400, detail=f"Unsupported file type. Allowed: {', '.join(allowed_ext)}")
 
+    is_image = lower.endswith(('.png', '.jpg', '.jpeg'))
+
     try:
         chat_dir = APP_DATA_DIR / chat_id
         chat_dir.mkdir(exist_ok=True)
@@ -324,50 +329,36 @@ async def process_image(chat_id: str = Form(...), file: UploadFile = File(...), 
             contents = await file.read()
             f.write(contents)
 
-        # Extract text depending on file type
-        extracted_text = ""
-        if lower.endswith('.pdf'):
-            if fitz is None:
-                raise HTTPException(status_code=500, detail='PyMuPDF (fitz) is not installed on the server')
-            try:
-                doc = fitz.open(str(file_path))
-                for page in doc:
-                    extracted_text += page.get_text()
-                doc.close()
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f'Failed to extract text from PDF: {str(e)}')
-        else:
-            # Image OCR
-            if Image is None or pytesseract is None:
-                raise HTTPException(status_code=500, detail='Pillow and/or pytesseract are not installed on the server')
-            try:
-                img = Image.open(file_path)
-                # Convert to RGB if needed
-                if img.mode in ('RGBA', 'P'):
-                    img = img.convert('RGB')
-                extracted_text = pytesseract.image_to_string(img)
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f'Failed to run OCR on image: {str(e)}')
+        #10th December 
+        # adding gemini multi modal input for pdf and jpeg.
+        def get_response(file_path):
+            if is_image:
+                # Open image and convert to RGB
+                image = Image.open(file_path).convert("RGB")
+            else :
+                file = Path(file_path)
 
-        # Save extracted text to a sidecar file for debugging/lookup
-        try:
-            sidecar = media_dir / f"{filename}.extracted.txt"
-            with open(sidecar, 'w', encoding='utf-8') as sf:
-                sf.write(extracted_text or "")
-        except Exception:
-            # not critical
-            pass
-
-        # Compose summarization prompt
-        user_prompt_part = f"User prompt: {prompt}\n\n" if prompt else ""
-        summarization_prompt = (
-            "You are an expert medical assistant.\n"
-            "Below is the text extracted from an uploaded file (PDF or image).\n"
-            f"{user_prompt_part}"
-            "Extract the important findings and provide a concise, patient-friendly summary and next steps if applicable.\n"
-            "Be clear and use simple language. Return the summary only.\n\n"
-            "Extracted text:\n" + (extracted_text or "[no extracted text]")
-        )
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[
+                    types.Part.from_bytes(
+                        data=file.read_bytes(),
+                        mime_type="application/pdf" if file.suffix.lower() == ".pdf" else "image/jpeg",
+                    ) if not is_image else image,
+                    prompt
+                ],
+                config=types.GenerateContentConfig(
+                    system_instruction="""
+                    You are an expert at answering medical questions based on the content of the provided file.
+                    Procedure:
+                    - Analyze the content of the file thoroughly.
+                    - If the content of the file is irrelevant to medical topics, politely inform the user that you can only answer medical questions.
+                    - If the content is relevant, provide a concise response to the requested prompt.
+                    - If the user prompt is unclear or missing, summarize the main points from the file.
+                    - Ensure the response is clear, accurate, and easy to understand.
+                    """,)
+                )
+            return response.text
 
         # Stream summary from the LLM
         async def stream_response():
@@ -382,7 +373,7 @@ async def process_image(chat_id: str = Form(...), file: UploadFile = File(...), 
             except Exception as e:
                 yield f"\n[ERROR]: {str(e)}"
 
-        return StreamingResponse(stream_response(), media_type='text/plain')
+        return StreamingResponse(sse_token_stream(get_response(file_path)), media_type='text/plain')
     except HTTPException:
         raise
     except Exception as e:
