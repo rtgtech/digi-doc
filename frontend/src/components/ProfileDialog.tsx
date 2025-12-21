@@ -13,9 +13,10 @@ import { useState, useEffect } from "react";
 interface ProfileDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onLogout: () => void;
 }
 
-export function ProfileDialog({ open, onOpenChange }: ProfileDialogProps) {
+export function ProfileDialog({ open, onOpenChange, onLogout }: ProfileDialogProps) {
   const [aboutMeText, setAboutMeText] = useState("");
   const [aboutMeSummary, setAboutMeSummary] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -156,6 +157,10 @@ export function ProfileDialog({ open, onOpenChange }: ProfileDialogProps) {
           <Button
             variant="outline"
             className="w-full justify-start gap-3 border-red-200 text-red-600 hover:bg-red-50 rounded-xl cursor-pointer"
+            onClick={() => {
+              onLogout();
+              onOpenChange(false);
+            }}
           >
             <LogOut className="w-4 h-4" />
             <span>Sign Out</span>

@@ -11,3 +11,7 @@ backend/.env
 frontend/node_modules
 
 frontend/public
+
+# I log my personal insights in this file
+
+ChangeLog.md

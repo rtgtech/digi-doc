@@ -6,12 +6,15 @@ import { ProfileDialog } from "./components/ProfileDialog";
 import { Sidebar } from "./components/Sidebar";
 import type { ChatSession } from "./components/Sidebar";
 import { UploadedMediaDialog } from "./components/UploadedMediaDialog";
+import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import { AuthPage } from "./components/AuthPage";
 
 function generateChatId(): string {
   return `chat_${Date.now()}`;
 }
 
-export default function App() {
+function AppContent() {
+  const { isAuthenticated, token, logout } = useAuth();
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isMediaOpen, setIsMediaOpen] = useState(false);
@@ -21,17 +24,29 @@ export default function App() {
   const [chatCounter, setChatCounter] = useState(1);
   const [titleGeneratedForChat, setTitleGeneratedForChat] = useState<string | null>(null);
 
+  // Helper function to get auth headers
+  const getAuthHeaders = () => ({
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`,
+  });
+
   // Initialize chat ID on app start
   useEffect(() => {
-    const initialChatId = generateChatId();
-    setCurrentChatId(initialChatId);
-  }, []);
+    if (isAuthenticated) {
+      const initialChatId = generateChatId();
+      setCurrentChatId(initialChatId);
+    }
+  }, [isAuthenticated]);
 
   // Fetch existing chats from backend on startup
   useEffect(() => {
+    if (!isAuthenticated) return;
+
     const fetchChats = async () => {
       try {
-        const res = await fetch('http://localhost:8000/chats');
+        const res = await fetch('http://localhost:8000/chats', {
+          headers: getAuthHeaders(),
+        });
         if (!res.ok) return;
         const data = await res.json();
         if (data?.chats) {
@@ -48,9 +63,11 @@ export default function App() {
     };
 
     fetchChats();
-  }, []);
+  }, [isAuthenticated, token]);
 
   const handleSendMessage = async (message: string, file?: File | null) => {
+    // Check if this is a new chat (no messages yet)
+    const isNewChat = messages.length === 0;
     // If this chat id is not yet in history, add it now (first message in new chat)
     if (currentChatId && !chatHistory.find((c) => c.id === currentChatId)) {
       const newSession: ChatSession = {
@@ -79,9 +96,7 @@ export default function App() {
     try {
       await fetch('http://localhost:8000/save-message', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           chat_id: currentChatId,
           sender: "user",
@@ -114,6 +129,9 @@ export default function App() {
 
         const response = await fetch('http://localhost:8000/process-image', {
           method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
           body: form,
         });
 
@@ -141,7 +159,7 @@ export default function App() {
         try {
           await fetch('http://localhost:8000/save-message', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getAuthHeaders(),
             body: JSON.stringify({
               chat_id: currentChatId,
               sender: 'bot',
@@ -154,14 +172,15 @@ export default function App() {
           console.error('Error saving bot message:', err);
         }
 
-        // Generate title for this chat if not already done
+        // Generate title for this chat if not already done and it's a new chat
         if (titleGeneratedForChat !== currentChatId) {
           try {
             const titleRes = await fetch('http://localhost:8000/generate-title', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: getAuthHeaders(),
               body: JSON.stringify({ response: accumulatedText }),
             });
+            console.log("Title generation from image block");
             if (titleRes.ok) {
               const titleData = await titleRes.json();
               const newTitle = titleData.title || `Chat #${chatCounter}`;
@@ -176,7 +195,7 @@ export default function App() {
               try {
                 await fetch('http://localhost:8000/update-chat-title', {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
+                  headers: getAuthHeaders(),
                   body: JSON.stringify({ chat_id: currentChatId, title: newTitle }),
                 });
               } catch (err) {
@@ -202,9 +221,7 @@ export default function App() {
     try {
       const response = await fetch('http://localhost:8000/ask_a', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ query: message, chat_id: currentChatId }),
       });
 
@@ -230,21 +247,22 @@ export default function App() {
       try {
         await fetch('http://localhost:8000/save-message', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(),
           body: JSON.stringify({ chat_id: currentChatId, sender: 'bot', text: accumulatedText, timestamp: new Date().toISOString() }),
         });
       } catch (error) {
         console.error('Error saving bot message:', error);
       }
 
-      // Generate title for this chat if not already done
-      if (titleGeneratedForChat !== currentChatId) {
+      // Generate title for this chat if not already done and it's a new chat
+      if (isNewChat && titleGeneratedForChat !== currentChatId) {
         try {
           const titleRes = await fetch('http://localhost:8000/generate-title', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getAuthHeaders(),
             body: JSON.stringify({ response: accumulatedText }),
           });
+          console.log("Title generation from text block");
           if (titleRes.ok) {
             const titleData = await titleRes.json();
             const newTitle = titleData.title || `Chat #${chatCounter}`;
@@ -259,7 +277,7 @@ export default function App() {
             try {
               await fetch('http://localhost:8000/update-chat-title', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify({ chat_id: currentChatId, title: newTitle }),
               });
             } catch (err) {
@@ -294,7 +312,9 @@ export default function App() {
     const loadChat = async (id: string) => {
       setCurrentChatId(id);
       try {
-        const res = await fetch(`http://localhost:8000/chat-data/${id}`);
+        const res = await fetch(`http://localhost:8000/chat-data/${id}`, {
+          headers: getAuthHeaders(),
+        });
         if (!res.ok) {
           setMessages([]);
           return;
@@ -347,6 +367,7 @@ export default function App() {
       <ProfileDialog
         open={isProfileOpen}
         onOpenChange={setIsProfileOpen}
+        onLogout={logout}
       />
 
       {/* Uploaded Media Dialog */}
@@ -358,3 +379,24 @@ export default function App() {
     </div>
   );
 }
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppRouter />
+    </AuthProvider>
+  );
+}
+
+function AppRouter() {
+  const { isAuthenticated } = useAuth();
+
+  if (!isAuthenticated) {
+    return <AuthPage />;
+  }
+
+  return <AppContent />;
+}
+
+export default App;
+

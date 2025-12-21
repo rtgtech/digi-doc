@@ -935,6 +935,10 @@
     background-color: var(--color-blue-100);
   }
 
+  .bg-blue-500 {
+    background-color: oklch(.488 .243 264.376);
+  }
+
   .bg-border {
     background-color: var(--border);
   }

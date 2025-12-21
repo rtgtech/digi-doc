@@ -1,8 +1,9 @@
 # api.py
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel, EmailStr
 from langchain_ollama import OllamaLLM
 from PIL import Image
 from contextlib import asynccontextmanager
@@ -10,17 +11,35 @@ import asyncio
 import os
 from pathlib import Path
 import json
-from datetime import datetime
+from datetime import datetime, date, timedelta, timezone
 import traceback
 import requests
 from google import genai
 from google.genai import types
-from dotenv import load_dotenv;
-import os;
+from dotenv import load_dotenv
+import jwt
+from passlib.context import CryptContext
+from motor.motor_asyncio import AsyncIOMotorClient
+from bson import ObjectId
+import uuid
 
 load_dotenv()
+
+# JWT settings
+SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-here")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# MongoDB settings
+MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
+DATABASE_NAME = "digidoc"
+
 # Hardcoded Gemini credentials (edit these values in-code)
-client : genai.Client | None = None
+client: genai.Client | None = None
+
 # Optional media processing libs
 try:
     import fitz  # PyMuPDF
@@ -37,42 +56,54 @@ try:
 except Exception:
     pytesseract = None
 
+# MongoDB client
+mongo_client: AsyncIOMotorClient | None = None
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # --- 🌟 Startup Code 🌟 ---
-    print("Application Startup: Initializing Gemini Client...")
-    
-    global client
+    global client, mongo_client
+    print("Application Startup: Initializing Gemini Client and MongoDB...")
+
     try:
-        # Initialize the client. It's safe to call Client() here, 
-        # as the context manager will handle the shutdown.
-        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY")) 
+        # Initialize Gemini client
+        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
         print("Gemini client initialized successfully.")
     except Exception as e:
-        # Handle cases where the client can't be initialized (e.g., missing API key)
         print(f"ERROR: Could not initialize Gemini client: {e}")
-        # In a real app, you might want to raise an exception here to halt startup.
-        
+
+    try:
+        # Initialize MongoDB client
+        mongo_client = AsyncIOMotorClient(MONGODB_URL)
+        # Test the connection
+        await mongo_client.admin.command('ping')
+        print("MongoDB client initialized successfully.")
+    except Exception as e:
+        print(f"ERROR: Could not initialize MongoDB client: {e}")
+
     # Yield control to the application to handle requests
     yield
 
     # --- 🛑 Shutdown Code (Executed when Ctrl+C is pressed) 🛑 ---
-    print("\nApplication Shutdown: Closing Gemini Client...") 
+    print("\nApplication Shutdown: Closing clients...")
 
     if client:
         try:
-            # The client's .close() method should be called for a clean shutdown.
-            # It's a synchronous call, so no 'await' is needed.
             client.close()
             print("Gemini client connection closed gracefully.")
         except Exception as e:
             print(f"Warning: Failed to close Gemini client cleanly: {e}")
-    else:
-        print("Gemini client was not initialized, skipping close.")
-    
+
+    if mongo_client:
+        try:
+            mongo_client.close()
+            print("MongoDB client connection closed gracefully.")
+        except Exception as e:
+            print(f"Warning: Failed to close MongoDB client cleanly: {e}")
+
     print("All cleanup complete. Application is shutting down.")
 
-app = FastAPI(title="Digital Doctor API", version="1.1.0",lifespan=lifespan)
+app = FastAPI(title="Digital Doctor API", version="1.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -82,12 +113,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Security
+security = HTTPBearer()
+
 # Initialize Ollama model once
 model = OllamaLLM(model="gemma3:1b")
 
-# APP_DATA directory setup
-APP_DATA_DIR = Path("APP_DATA")
-APP_DATA_DIR.mkdir(exist_ok=True)
+# MEDIA directory setup
+MEDIA_DIR = Path("MEDIA")
+MEDIA_DIR.mkdir(exist_ok=True)
+
+# Pydantic models
+class UserRegister(BaseModel):
+    name: str
+    email: EmailStr
+    about: str
+    date_of_birth: date
+    password: str
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class TokenData(BaseModel):
+    user_id: str | None = None
 
 class QueryRequest(BaseModel):
     query: str
@@ -100,58 +153,159 @@ class MessageData(BaseModel):
     media: str | None = None
     timestamp: str
 
-# @app.post("/ask")
-# async def ask_doctor(request: QueryRequest):
-#     query = request.query.strip()
-#     chat_id = request.chat_id
-    
-#     if not query:
-#         raise HTTPException(status_code=400, detail="Query cannot be empty.")
-#     if not chat_id:
-#         raise HTTPException(status_code=400, detail="Chat ID is required.")
+class UpdateChatTitleRequest(BaseModel):
+    chat_id: str
+    title: str
 
-#     # Create chat-specific directory if it doesn't exist
-#     chat_dir = APP_DATA_DIR / chat_id
-#     chat_dir.mkdir(exist_ok=True)
+class AboutMeRequest(BaseModel):
+    text: str
 
-#     review = retriver.invoke(query)
-#     context = review[0].page_content if review else "No relevant context found."
+# Helper functions
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
 
-#     prompt = f"""
-# You are an expert medical assistant.
-# Consider this context:
-# '
-# {context}
-# '
-# Now answer the user's query in a clear, concise, and helpful way:
-# {query}
-# """
-#     prompt2 = f"""
-# You are a friendly medical query assistant. Respond to the users queries with the right response.
-# Guidelines while responding:
+def get_password_hash(password):
+    # bcrypt has a 72-byte limit, so truncate the password if necessary
+    password_bytes = password.encode('utf-8')
+    if len(password_bytes) > 72:
+        # Truncate to 72 bytes and ensure it's valid UTF-8
+        truncated_bytes = password_bytes[:72]
+        # Find the last complete UTF-8 character
+        while len(truncated_bytes) > 0:
+            try:
+                password = truncated_bytes.decode('utf-8')
+                break
+            except UnicodeDecodeError:
+                # Remove the last byte and try again
+                truncated_bytes = truncated_bytes[:-1]
+        else:
+            # If we can't decode anything, use empty string (shouldn't happen)
+            password = ""
+    return pwd_context.hash(password)
 
-# - If the question seems to critical. Recommend to consult a doctor right away.
-# - If the question is from another domain. Clearly state that you answer medical questions only.
+def create_access_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
 
-# Now answer the user's query in a clear, concise, and helpful way:
-# {query}
-# """
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    try:
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Invalid authentication credentials")
+        token_data = TokenData(user_id=user_id)
+    except (jwt.InvalidTokenError, jwt.DecodeError):
+        raise HTTPException(status_code=401, detail="Invalid authentication credentials")
 
-#     async def stream_response():
-#         """Properly stream Ollama output chunk by chunk."""
-#         try:
-#             for chunk in model.stream(prompt2):
-#                 # 🧩 FIX: OllamaLLM chunks can be str or have .text property
-#                 text = getattr(chunk, "text", None)
-#                 if text:
-#                     yield text
-#                 elif isinstance(chunk, str):
-#                     yield chunk
-#                 await asyncio.sleep(0.01)
-#         except Exception as e:
-#             yield f"\n[ERROR]: {str(e)}"
+    # Verify user exists
+    db = mongo_client[DATABASE_NAME]
+    user = await db.users.find_one({"_id": ObjectId(token_data.user_id)})
+    if user is None:
+        raise HTTPException(status_code=401, detail="User not found")
 
-#     return StreamingResponse(stream_response(), media_type="text/plain")
+    return user
+
+# Database helper functions
+async def get_db():
+    return mongo_client[DATABASE_NAME]
+
+async def create_chat(user_id: str, chat_id: str, title: str = ""):
+    db = await get_db()
+    chat_doc = {
+        "_id": chat_id,
+        "user_id": ObjectId(user_id),
+        "title": title or chat_id,
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc)
+    }
+    await db.chats.insert_one(chat_doc)
+    return chat_doc
+
+async def save_message(chat_id: str, sender: str, text: str, timestamp: str, media: str = None):
+    db = await get_db()
+    message_doc = {
+        "chat_id": chat_id,
+        "sender": sender,
+        "text": text,
+        "timestamp": timestamp,
+        "media": media
+    }
+    await db.messages.insert_one(message_doc)
+    return message_doc
+
+async def get_chat_messages(chat_id: str):
+    db = await get_db()
+    messages = await db.messages.find({"chat_id": chat_id}).sort("timestamp", 1).to_list(length=None)
+    return messages
+
+async def get_user_chats(user_id: str):
+    db = await get_db()
+    chats = await db.chats.find({"user_id": ObjectId(user_id)}).sort("updated_at", -1).to_list(length=None)
+    return chats
+
+async def update_chat_title(chat_id: str, title: str):
+    db = await get_db()
+    await db.chats.update_one(
+        {"_id": chat_id},
+        {"$set": {"title": title, "updated_at": datetime.now(timezone.utc)}}
+    )
+
+# Endpoints
+@app.post("/register", response_model=Token)
+async def register_user(user: UserRegister):
+    db = await get_db()
+
+    # Check if user already exists
+    existing_user = await db.users.find_one({"email": user.email})
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    # Hash password
+    hashed_password = get_password_hash(user.password)
+
+    # Create user document
+    user_doc = {
+        "name": user.name,
+        "email": user.email,
+        "about": user.about,
+        "date_of_birth": user.date_of_birth.isoformat(),
+        "password_hash": hashed_password,
+        "created_at": datetime.now()
+    }
+
+    result = await db.users.insert_one(user_doc)
+    user_id = str(result.inserted_id)
+
+    # Create access token
+    access_token = create_access_token(data={"sub": user_id})
+
+    return Token(access_token=access_token, token_type="bearer")
+
+@app.post("/login", response_model=Token)
+async def login_user(user: UserLogin):
+    db = await get_db()
+
+    # Find user
+    db_user = await db.users.find_one({"email": user.email})
+    if not db_user:
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+
+    # Verify password
+    if not verify_password(user.password, db_user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+
+    # Create access token
+    access_token = create_access_token(data={"sub": str(db_user["_id"])})
+
+    return Token(access_token=access_token, token_type="bearer")
+
+@app.post("/logout")
+async def logout_user(current_user: dict = Depends(get_current_user)):
+    # Since JWT is stateless, logout is handled on client side
+    return {"message": "Successfully logged out"}
 
 async def sse_token_stream(text: str):
     buff = []
@@ -174,130 +328,122 @@ async def sse_token_stream(text: str):
         yield f"{''.join(buff)} "
 
 @app.post("/ask_a")
-def stream_sse(request: QueryRequest):
+async def stream_sse(request: QueryRequest, current_user: dict = Depends(get_current_user)):
+    # Check if Gemini client is initialized
+    if client is None:
+        raise HTTPException(status_code=503, detail="Gemini service is not available")
+    
+    # Ensure chat exists
+    db = await get_db()
+    chat = await db.chats.find_one({"_id": request.chat_id, "user_id": ObjectId(current_user["_id"])})
+    if not chat:
+        await create_chat(str(current_user["_id"]), request.chat_id)
+
     response = client.models.generate_content(
-    model="gemini-2.5-flash",
-    contents=[request.query.strip()],
-    config=types.GenerateContentConfig(
-        system_instruction="""
-        You are a medical expert. Your task is to answer medical questions. 
-        Guidelines:
-        - If the question seems too critical, recommend consulting a doctor right away.
-        - If the question is from another domain, clearly state that you answer medical questions only.
-        - Return the answer in well structured markdown format use numbered lists, bullet points and bold font whenever necessary.
-        - Keep the answer concise and to the point, within 200 words.
-        """,)
-)
+        model="gemini-2.5-flash-lite",
+        contents=[request.query.strip()],
+        config=types.GenerateContentConfig(
+            system_instruction="""
+            You are a medical expert. Your task is to answer medical questions.
+            Guidelines:
+            - If the question seems too critical, recommend consulting a doctor right away.
+            - If the question is from another domain, clearly state that you answer medical questions only.
+            - Return the answer in well structured markdown format use numbered lists, bullet points and bold font whenever necessary.
+            - Keep the answer concise and to the point, within 200 words.
+            """,)
+    )
     huge_markdown_output = response.text
-    return StreamingResponse(sse_token_stream(huge_markdown_output),
-                             media_type="text/plain")
 
+    # Update chat updated_at
+    await db.chats.update_one(
+        {"_id": request.chat_id},
+        {"$set": {"updated_at": datetime.now(timezone.utc)}}
+    )
 
+    return StreamingResponse(sse_token_stream(huge_markdown_output), media_type="text/plain")
 
 @app.post("/save-message")
-async def save_message(message: MessageData):
+async def save_message_endpoint(message: MessageData, current_user: dict = Depends(get_current_user)):
     """
-    Save message metadata to a JSON file
+    Save message metadata to database
     """
-    chat_id = message.chat_id
-    
-    if not chat_id:
-        raise HTTPException(status_code=400, detail="Chat ID is required.")
-    
-    try:
-        # Create chat-specific directory if it doesn't exist
-        chat_dir = APP_DATA_DIR / chat_id
-        chat_dir.mkdir(exist_ok=True)
-        
-        # Load existing messages or create new list
-        messages_file = chat_dir / "messages.json"
-        
-        if messages_file.exists():
-            with open(messages_file, "r") as f:
-                messages = json.load(f)
-        else:
-            messages = []
-        
-        # Add new message (include media if present)
-        msg_obj = {
-            "sender": message.sender,
-            "text": message.text,
-            "timestamp": message.timestamp
-        }
-        if getattr(message, 'media', None):
-            msg_obj['media'] = message.media
-        messages.append(msg_obj)
-        
-        # Save updated messages
-        with open(messages_file, "w") as f:
-            json.dump(messages, f, indent=2)
-        
-        return {
-            "status": "success",
-            "message": "Message saved successfully",
-            "chat_id": chat_id
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save message: {str(e)}")
+    # Ensure chat exists and belongs to user
+    db = await get_db()
+    chat = await db.chats.find_one({"_id": message.chat_id, "user_id": ObjectId(current_user["_id"])})
+    if not chat:
+        await create_chat(str(current_user["_id"]), message.chat_id)
 
+    await save_message(message.chat_id, message.sender, message.text, message.timestamp, message.media)
+
+    # Update chat updated_at
+    await db.chats.update_one(
+        {"_id": message.chat_id},
+        {"$set": {"updated_at": datetime.now(timezone.utc)}}
+    )
+
+    return {
+        "status": "success",
+        "message": "Message saved successfully",
+        "chat_id": message.chat_id
+    }
 
 @app.get("/chat-data/{chat_id}")
-async def get_chat_data(chat_id: str):
+async def get_chat_data(chat_id: str, current_user: dict = Depends(get_current_user)):
     """
-    Retrieve all messages and media files for a specific chat
+    Retrieve all messages for a specific chat
     """
-    if not chat_id:
-        raise HTTPException(status_code=400, detail="Chat ID is required.")
-    
-    try:
-        chat_dir = APP_DATA_DIR / chat_id
-        
-        if not chat_dir.exists():
-            return {
-                "messages": [],
-                "media_files": []
-            }
-        
-        # Load messages
-        messages = []
-        messages_file = chat_dir / "messages.json"
-        if messages_file.exists():
-            with open(messages_file, "r") as f:
-                messages = json.load(f)
-        
-        # Get media files
-        media_files = []
-        media_dir = chat_dir / "media"
-        if media_dir.exists():
-            media_files = [f.name for f in media_dir.iterdir() if f.is_file()]
-        
-        return {
-            "messages": messages,
-            "media_files": media_files,
-            "chat_id": chat_id
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve chat data: {str(e)}")
+    # Verify chat belongs to user
+    db = await get_db()
+    chat = await db.chats.find_one({"_id": chat_id, "user_id": ObjectId(current_user["_id"])})
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
 
+    messages = await get_chat_messages(chat_id)
+
+    # Serialize messages properly (convert ObjectId and datetime to strings)
+    serialized_messages = []
+    media_files = []
+    
+    for msg in messages:
+        serialized_msg = {
+            "sender": msg.get("sender"),
+            "text": msg.get("text"),
+            "timestamp": msg.get("timestamp"),
+            "media": msg.get("media")
+        }
+        serialized_messages.append(serialized_msg)
+        
+        if msg.get("media"):
+            media_files.append(msg["media"])
+
+    return {
+        "messages": serialized_messages,
+        "media_files": list(set(media_files)),  # Remove duplicates
+        "chat_id": chat_id
+    }
 
 @app.get('/media/{chat_id}/{filename}')
-async def serve_media(chat_id: str, filename: str):
+async def serve_media(chat_id: str, filename: str, current_user: dict = Depends(get_current_user)):
     """Serve media file for a given chat. Returns FileResponse."""
-    try:
-        chat_dir = APP_DATA_DIR / chat_id
-        media_path = chat_dir / 'media' / filename
-        if not media_path.exists():
-            raise HTTPException(status_code=404, detail='File not found')
-        from fastapi.responses import FileResponse
-        return FileResponse(path=str(media_path), filename=filename)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to serve media: {str(e)}")
+    # Verify chat belongs to user
+    db = await get_db()
+    chat = await db.chats.find_one({"_id": chat_id, "user_id": ObjectId(current_user["_id"])})
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
 
+    media_path = MEDIA_DIR / chat_id / filename
+    if not media_path.exists():
+        raise HTTPException(status_code=404, detail='File not found')
+    from fastapi.responses import FileResponse
+    return FileResponse(path=str(media_path), filename=filename)
 
 @app.post('/process-image')
-async def process_image(chat_id: str = Form(...), file: UploadFile = File(...), prompt: str = Form("")):
+async def process_image(
+    chat_id: str = Form(...),
+    file: UploadFile = File(...),
+    prompt: str = Form(""),
+    current_user: dict = Depends(get_current_user)
+):
     """Process an uploaded media file, extract text (PDF or image), summarize via the LLM and stream the summary.
 
     Accepts multipart/form-data with fields:
@@ -305,8 +451,15 @@ async def process_image(chat_id: str = Form(...), file: UploadFile = File(...), 
     - file (upload)
     - prompt (form, optional)
     """
-    if not chat_id:
-        raise HTTPException(status_code=400, detail='Chat ID is required')
+    # Check if Gemini client is initialized
+    if client is None:
+        raise HTTPException(status_code=503, detail="Gemini service is not available")
+    
+    # Verify chat belongs to user
+    db = await get_db()
+    chat = await db.chats.find_one({"_id": chat_id, "user_id": ObjectId(current_user["_id"])})
+    if not chat:
+        await create_chat(str(current_user["_id"]), chat_id)
 
     # Restrict allowed file types
     filename = file.filename or "uploaded"
@@ -318,265 +471,163 @@ async def process_image(chat_id: str = Form(...), file: UploadFile = File(...), 
     is_image = lower.endswith(('.png', '.jpg', '.jpeg'))
 
     try:
-        chat_dir = APP_DATA_DIR / chat_id
-        chat_dir.mkdir(exist_ok=True)
-        media_dir = chat_dir / 'media'
-        media_dir.mkdir(exist_ok=True)
-        file_path = media_dir / filename
+        # Create chat media directory
+        chat_media_dir = MEDIA_DIR / chat_id
+        chat_media_dir.mkdir(exist_ok=True)
+        file_path = chat_media_dir / filename
 
         # Save uploaded file
         with open(file_path, 'wb') as f:
             contents = await file.read()
             f.write(contents)
 
-        #10th December 
-        # adding gemini multi modal input for pdf and jpeg.
-        def get_response(file_path):
-            if is_image:
-                # Open image and convert to RGB
-                image = Image.open(file_path).convert("RGB")
-            else :
-                file = Path(file_path)
+        # Process with Gemini
+        if is_image:
+            image = Image.open(file_path).convert("RGB")
+            content = [image, prompt] if prompt else [image]
+        else:
+            content = [types.Part.from_bytes(
+                data=file_path.read_bytes(),
+                mime_type="application/pdf",
+            )]
+            if prompt:
+                content.append(prompt)
 
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=[
-                    types.Part.from_bytes(
-                        data=file.read_bytes(),
-                        mime_type="application/pdf" if file.suffix.lower() == ".pdf" else "image/jpeg",
-                    ) if not is_image else image,
-                    prompt
-                ],
-                config=types.GenerateContentConfig(
-                    system_instruction="""
-                    You are an expert at answering medical questions.
-                    Procedure:
-                    - Analyze the file, The file may be a medical image, medical report.
-                    - If the content of the file is irrelevant to medical topics, politely inform the user that you can only answer medical questions.
-                    - If the content is relevant, provide a concise response to the requested prompt.
-                    - If the user prompt is unclear or missing, summarize the main points from the file.
-                    - Ensure the response is clear, accurate, and easy to understand.
-                    """,)
-                )
-            return response.text
+        response = client.models.generate_content(
+            model="gemini-2.5-flash-lite",
+            contents=content,
+            config=types.GenerateContentConfig(
+                system_instruction="""
+                You are an expert at answering medical questions.
+                Procedure:
+                - Analyze the file, The file may be a medical image, medical report.
+                - If the content of the file is irrelevant to medical topics, politely inform the user that you can only answer medical questions.
+                - If the content is relevant, provide a concise response to the requested prompt.
+                - If the user prompt is unclear or missing, summarize the main points from the file.
+                - Ensure the response is clear, accurate, and easy to understand.
+                """,)
+        )
 
-        # Stream summary from the LLM
-        async def stream_response():
-            try:
-                for chunk in model.stream(summarization_prompt):
-                    text = getattr(chunk, 'text', None)
-                    if text:
-                        yield text
-                    elif isinstance(chunk, str):
-                        yield chunk
-                    await asyncio.sleep(0.01)
-            except Exception as e:
-                yield f"\n[ERROR]: {str(e)}"
+        summary = response.text
 
-        return StreamingResponse(sse_token_stream(get_response(file_path)), media_type='text/plain')
+        # Update chat updated_at
+        await db.chats.update_one(
+            {"_id": chat_id},
+            {"$set": {"updated_at": datetime.now(timezone.utc)}}
+        )
+
+        return StreamingResponse(sse_token_stream(summary), media_type='text/plain')
     except HTTPException:
         raise
     except Exception as e:
-        # Write full traceback to APP_DATA error log for debugging
-        try:
-            log_file = APP_DATA_DIR / 'error.log'
-            with open(log_file, 'a', encoding='utf-8') as lf:
-                lf.write(f"[{datetime.now().isoformat()}] process-image error:\n")
-                traceback.print_exc(file=lf)
-                lf.write("\n\n")
-        except Exception:
-            pass
         raise HTTPException(status_code=500, detail=f"Failed to process media: {str(e)}")
 
-
 @app.get("/chats")
-async def list_chats():
+async def list_chats(current_user: dict = Depends(get_current_user)):
     """
-    List all existing chat IDs (directories) under APP_DATA with basic metadata.
+    List all chats for the current user.
     """
-    try:
-        if not APP_DATA_DIR.exists():
-            return {"chats": []}
+    chats = await get_user_chats(str(current_user["_id"]))
 
-        chats = []
-        for entry in APP_DATA_DIR.iterdir():
-            if entry.is_dir():
-                # read messages.json to get a timestamp or use dir mtime
-                messages_file = entry / "messages.json"
-                last_message_time = None
-                if messages_file.exists():
-                    try:
-                        with open(messages_file, "r") as f:
-                            msgs = json.load(f)
-                        if msgs:
-                            # use timestamp of last message if present
-                            last_message_time = msgs[-1].get("timestamp")
-                    except Exception:
-                        last_message_time = None
+    # Format for response
+    chat_list = []
+    for chat in chats:
+        # Get last message timestamp
+        db = await get_db()
+        last_message = await db.messages.find_one(
+            {"chat_id": chat["_id"]},
+            sort=[("timestamp", -1)]
+        )
+        last_activity = last_message["timestamp"] if last_message else chat["created_at"].isoformat()
 
-                if not last_message_time:
-                    # fallback to directory modified time
-                    last_message_time = datetime.fromtimestamp(entry.stat().st_mtime).isoformat()
+        chat_list.append({
+            "id": chat["_id"],
+            "title": chat["title"],
+            "last_activity": last_activity
+        })
 
-                # Try to read title from metadata.json
-                title = entry.name  # default to chat_id
-                metadata_file = entry / "metadata.json"
-                if metadata_file.exists():
-                    try:
-                        with open(metadata_file, "r") as f:
-                            metadata = json.load(f)
-                            if metadata.get("title"):
-                                title = metadata["title"]
-                    except Exception:
-                        pass
-
-                chats.append({
-                    "id": entry.name,
-                    "title": title,
-                    "last_activity": last_message_time
-                })
-
-        # sort by last_activity desc
-        chats.sort(key=lambda c: c.get("last_activity", ""), reverse=True)
-        return {"chats": chats}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to list chats: {str(e)}")
-
-
+    return {"chats": chat_list}
 
 @app.post("/generate-title")
-async def generate_title(request: dict):
+async def generate_title(request: dict, current_user: dict = Depends(get_current_user)):
     """
     Generate a smart 3-5 word title from the bot's response.
     """
-    try:
-        response_text = request.get("response", "").strip()
-        if not response_text:
-            raise HTTPException(status_code=400, detail="Response text is required")
+    response_text = request.get("response", "").strip()
+    if not response_text:
+        raise HTTPException(status_code=400, detail="Response text is required")
 
-        # Use the LLM to generate a concise title
-        prompt = f"""Given this text, generate a concise 3-5 word title that summarizes it:
+    # Use the LLM to generate a concise title
+    prompt = f"""Given this text, generate a concise 3-5 word title that summarizes it:
 
 Text: {response_text}
 
 Title (only 3-5 words, no punctuation):"""
 
-        title = model.invoke(prompt).strip()
-        # Clean up title - remove quotes, limit to first 3-5 words
-        title = title.replace('"', '').replace("'", '')
-        words = title.split()[:5]
-        title = ' '.join(words)
+    title = model.invoke(prompt).strip()
+    # Clean up title - remove quotes, limit to first 3-5 words
+    title = title.replace('"', '').replace("'", '')
+    words = title.split()[:5]
+    title = ' '.join(words)
 
-        return {"title": title}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate title: {str(e)}")
+    return {"title": title}
 
+@app.post("/update-chat-title")
+async def update_chat_title_endpoint(request: UpdateChatTitleRequest, current_user: dict = Depends(get_current_user)):
+    """
+    Save/update the chat title.
+    """
+    # Verify chat belongs to user
+    db = await get_db()
+    chat = await db.chats.find_one({"_id": request.chat_id, "user_id": ObjectId(current_user["_id"])})
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
 
-class AboutMeRequest(BaseModel):
-    text: str
+    await update_chat_title(request.chat_id, request.title)
 
-
-class UpdateChatTitleRequest(BaseModel):
-    chat_id: str
-    title: str
-
+    return {
+        "status": "success",
+        "chat_id": request.chat_id,
+        "title": request.title
+    }
 
 @app.post("/summarize-about-me")
-async def summarize_about_me(request: AboutMeRequest):
+async def summarize_about_me(request: AboutMeRequest, current_user: dict = Depends(get_current_user)):
     """
-    Summarize the user's about-me text into bullet points and save to file.
+    Summarize the user's about-me text into bullet points and save to database.
     """
-    try:
-        text = request.text.strip()
-        if not text:
-            raise HTTPException(status_code=400, detail="Text is required")
+    text = request.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Text is required")
 
-        # Use LLM to generate bullet points
-        prompt = f"""Summarize the following text into 3-5 concise bullet points:
+    # Use LLM to generate bullet points
+    prompt = f"""Summarize the following text into 3-5 concise bullet points:
 
 Text: {text}
 
 Bullet points:"""
 
-        summary = model.invoke(prompt).strip()
+    summary = model.invoke(prompt).strip()
 
-        # Save to about_me.json in APP_DATA
-        about_me_file = APP_DATA_DIR / "about_me.json"
-        about_me_data = {
-            "original_text": text,
-            "summary": summary,
-            "timestamp": datetime.now().isoformat()
-        }
+    # Save to user document
+    db = await get_db()
+    await db.users.update_one(
+        {"_id": ObjectId(current_user["_id"])},
+        {"$set": {"about_summary": summary, "about_original": text}}
+    )
 
-        with open(about_me_file, "w") as f:
-            json.dump(about_me_data, f, indent=2)
-
-        return {
-            "status": "success",
-            "summary": summary
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to summarize: {str(e)}")
-
+    return {
+        "status": "success",
+        "summary": summary
+    }
 
 @app.get("/get-about-me")
-async def get_about_me():
+async def get_about_me(current_user: dict = Depends(get_current_user)):
     """
-    Retrieve the stored about-me summary from file.
+    Retrieve the stored about-me summary from database.
     """
-    try:
-        about_me_file = APP_DATA_DIR / "about_me.json"
-        if not about_me_file.exists():
-            return {
-                "original_text": "",
-                "summary": ""
-            }
-
-        with open(about_me_file, "r") as f:
-            data = json.load(f)
-
-        return {
-            "original_text": data.get("original_text", ""),
-            "summary": data.get("summary", "")
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve about-me: {str(e)}")
-
-
-@app.post("/update-chat-title")
-async def update_chat_title(request: UpdateChatTitleRequest):
-    """
-    Save/update the chat title to a metadata file.
-    """
-    try:
-        chat_id = request.chat_id.strip()
-        title = request.title.strip()
-        
-        if not chat_id:
-            raise HTTPException(status_code=400, detail="Chat ID is required")
-        if not title:
-            raise HTTPException(status_code=400, detail="Title is required")
-
-        # Create chat directory if it doesn't exist
-        chat_dir = APP_DATA_DIR / chat_id
-        chat_dir.mkdir(exist_ok=True)
-
-        # Save title to metadata file
-        metadata_file = chat_dir / "metadata.json"
-        metadata = {
-            "chat_id": chat_id,
-            "title": title,
-            "updated_at": datetime.now().isoformat()
-        }
-
-        with open(metadata_file, "w") as f:
-            json.dump(metadata, f, indent=2)
-
-        return {
-            "status": "success",
-            "chat_id": chat_id,
-            "title": title
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to update chat title: {str(e)}")
+    return {
+        "original_text": current_user.get("about_original", ""),
+        "summary": current_user.get("about_summary", "")
+    }
 
