@@ -76,7 +76,7 @@ app = FastAPI(title="Digital Doctor API", version="1.1.0",lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # You can restrict this later, e.g. ["http://localhost:3000"]
+    allow_origins=["http://localhost:5173"],  # You can restrict this later, e.g. ["http://localhost:3000"]
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -349,9 +349,9 @@ async def process_image(chat_id: str = Form(...), file: UploadFile = File(...), 
                 ],
                 config=types.GenerateContentConfig(
                     system_instruction="""
-                    You are an expert at answering medical questions based on the content of the provided file.
+                    You are an expert at answering medical questions.
                     Procedure:
-                    - Analyze the content of the file thoroughly.
+                    - Analyze the file, The file may be a medical image, medical report.
                     - If the content of the file is irrelevant to medical topics, politely inform the user that you can only answer medical questions.
                     - If the content is relevant, provide a concise response to the requested prompt.
                     - If the user prompt is unclear or missing, summarize the main points from the file.
