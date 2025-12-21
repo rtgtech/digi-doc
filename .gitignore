@@ -1,13 +1,13 @@
-venv
+backend/APP_DATA
 
-data 
+backend/MEDIA
 
-APP_DATA
+backend/venv
 
-.env
+backend/__pycache__
 
-digidoc-ppt.pptx
+backend/.env
 
-__pycache__
+frontend/node_modules
 
-temp.py
+frontend/public
