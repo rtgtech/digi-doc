@@ -28,6 +28,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
   const [registerData, setRegisterData] = useState({
     name: '',
     email: '',
+    phone_number: '',
     about: '',
     date_of_birth: '',
     password: '',
@@ -73,6 +74,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
       const success = await register({
         name: registerData.name,
         email: registerData.email,
+        phone_number: registerData.phone_number,
         about: registerData.about,
         date_of_birth: registerData.date_of_birth,
         password: registerData.password,
@@ -112,14 +114,14 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
         <CardContent>
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger 
-                value="login" 
+              <TabsTrigger
+                value="login"
                 className={`${activeTab === 'login' ? 'bg-[#4BA3C3] text-white font-semibold' : 'text-gray-600'}`}
               >
                 Login
               </TabsTrigger>
-              <TabsTrigger 
-                value="register" 
+              <TabsTrigger
+                value="register"
                 className={`${activeTab === 'register' ? 'bg-[#4BA3C3] text-white font-semibold' : 'text-gray-600'}`}
               >
                 Register
@@ -201,6 +203,20 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
                     value={registerData.email}
                     onChange={(e) =>
                       setRegisterData({ ...registerData, email: e.target.value })
+                    }
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="register-phone">Phone Number</Label>
+                  <Input
+                    id="register-phone"
+                    type="tel"
+                    placeholder="Enter your phone number"
+                    className="bg-[#F9FBFC]-ip-box"
+                    value={registerData.phone_number}
+                    onChange={(e) =>
+                      setRegisterData({ ...registerData, phone_number: e.target.value })
                     }
                     required
                   />

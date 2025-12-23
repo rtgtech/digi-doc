@@ -9,33 +9,40 @@ import { Badge } from "./ui/badge";
 import { FileText, Image as ImageIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
+import { useAuth } from "../contexts/AuthContext";
 
 interface MediaFile {
   name: string;
+  chat_id: string;
+  timestamp?: string;
 }
 
 interface UploadedMediaDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  currentChatId?: string;
 }
 
-export function UploadedMediaDialog({ open, onOpenChange, currentChatId }: UploadedMediaDialogProps) {
+export function UploadedMediaDialog({ open, onOpenChange }: UploadedMediaDialogProps) {
+  const { token } = useAuth();
   const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([]);
 
   // Fetch media files when dialog opens
   useEffect(() => {
-    if (open && currentChatId) {
+    if (open && token) {
       fetchMediaFiles();
     }
-  }, [open, currentChatId]);
+  }, [open, token]);
 
   const fetchMediaFiles = async () => {
     try {
-      const response = await fetch(`http://localhost:8000/chat-data/${currentChatId}`);
+      const response = await fetch('http://localhost:8000/user/media', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
       if (response.ok) {
         const data = await response.json();
-        setMediaFiles(data.media_files.map((filename: string) => ({ name: filename })));
+        setMediaFiles(data.media_files);
       }
     } catch (error) {
       console.error('Error fetching media files:', error);
@@ -87,6 +94,7 @@ export function UploadedMediaDialog({ open, onOpenChange, currentChatId }: Uploa
                 transition={{ delay: index * 0.05, duration: 0.3 }}
                 whileHover={{ scale: 1.05 }}
                 className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow cursor-pointer"
+                onClick={() => window.open(`http://localhost:8000/media/${file.chat_id}/${file.name}?token=${token}`, '_blank')}
               >
                 {/* Thumbnail/Icon */}
                 <div className="flex items-center justify-center h-24 bg-[#F9FBFC] rounded-lg mb-3">

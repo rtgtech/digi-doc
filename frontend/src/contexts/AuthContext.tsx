@@ -1,10 +1,11 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import ReactNode from 'react';
+import type { ReactNode } from 'react';
 
 interface User {
   id: string;
   name: string;
   email: string;
+  phone_number?: string;
   about?: string;
   date_of_birth?: string;
 }
@@ -22,6 +23,7 @@ interface AuthContextType {
 interface RegisterData {
   name: string;
   email: string;
+  phone_number: string;
   about: string;
   date_of_birth: string;
   password: string;
@@ -51,11 +53,28 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const storedToken = localStorage.getItem('auth_token');
     if (storedToken) {
       setToken(storedToken);
-      // TODO: Validate token with backend and get user info
-      // For now, we'll assume it's valid
-      setUser({ id: 'temp', name: 'User', email: 'user@example.com' });
+      // Fetch user data from backend
+      fetch('http://localhost:8000/me', {
+        headers: {
+          'Authorization': `Bearer ${storedToken}`,
+        },
+      })
+        .then(res => res.json())
+        .then(data => {
+          setUser(data);
+        })
+        .catch(err => {
+          console.error('Failed to fetch user data:', err);
+          // Clear invalid token
+          localStorage.removeItem('auth_token');
+          setToken(null);
+        })
+        .finally(() => {
+          setIsLoading(false);
+        });
+    } else {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   }, []);
 
   const login = async (email: string, password: string): Promise<boolean> => {
@@ -79,13 +98,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       localStorage.setItem('auth_token', access_token);
       setToken(access_token);
 
-      // TODO: Get user info from token or separate endpoint
-      // For now, set basic user info
-      setUser({
-        id: 'temp', // We'll get this from token decoding later
-        name: 'User',
-        email: email,
+      // Fetch user data
+      const userResponse = await fetch('http://localhost:8000/me', {
+        headers: {
+          'Authorization': `Bearer ${access_token}`,
+        },
       });
+
+      if (userResponse.ok) {
+        const userData = await userResponse.json();
+        setUser(userData);
+      }
 
       return true;
     } catch (error) {
@@ -115,14 +138,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       localStorage.setItem('auth_token', access_token);
       setToken(access_token);
 
-      // Set user info
-      setUser({
-        id: 'temp', // We'll get this from token decoding later
-        name: userData.name,
-        email: userData.email,
-        about: userData.about,
-        date_of_birth: userData.date_of_birth,
+      // Fetch user data
+      const userResponse = await fetch('http://localhost:8000/me', {
+        headers: {
+          'Authorization': `Bearer ${access_token}`,
+        },
       });
+
+      if (userResponse.ok) {
+        const userDataResponse = await userResponse.json();
+        setUser(userDataResponse);
+      }
 
       return true;
     } catch (error) {

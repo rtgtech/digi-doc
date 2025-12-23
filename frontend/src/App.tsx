@@ -84,6 +84,7 @@ function AppContent() {
       text: message,
       sender: "user",
       timestamp: new Date(),
+      chatId: currentChatId,
     };
     // attach media name to message object if present (frontend representation)
     if (file) {
@@ -116,6 +117,7 @@ function AppContent() {
       text: "",
       sender: "bot",
       timestamp: new Date(),
+      chatId: currentChatId,
     };
     setMessages((prev) => [...prev, botMessage]);
 
@@ -219,10 +221,20 @@ function AppContent() {
 
     // No file attached: use the regular /ask streaming endpoint
     try {
+      // Prepare history (last 10 messages)
+      const history = messages.slice(-10).map(msg => ({
+        role: msg.sender === 'user' ? 'user' : 'model',
+        parts: [msg.text]
+      }));
+
       const response = await fetch('http://localhost:8000/ask_a', {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ query: message, chat_id: currentChatId }),
+        body: JSON.stringify({
+          query: message,
+          chat_id: currentChatId,
+          history: history
+        }),
       });
 
       if (!response.ok) {
@@ -326,6 +338,7 @@ function AppContent() {
           sender: m.sender,
           timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
           media: m.media,
+          chatId: id,
         }));
         setMessages(msgs);
       } catch (err) {
@@ -374,7 +387,6 @@ function AppContent() {
       <UploadedMediaDialog
         open={isMediaOpen}
         onOpenChange={setIsMediaOpen}
-        currentChatId={currentChatId}
       />
     </div>
   );
@@ -392,7 +404,7 @@ function AppRouter() {
   const { isAuthenticated } = useAuth();
 
   if (!isAuthenticated) {
-    return <AuthPage />;
+    return <AuthPage onAuthSuccess={() => { }} />;
   }
 
   return <AppContent />;

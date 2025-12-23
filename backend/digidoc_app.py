@@ -127,6 +127,7 @@ MEDIA_DIR.mkdir(exist_ok=True)
 class UserRegister(BaseModel):
     name: str
     email: EmailStr
+    phone_number: str
     about: str
     date_of_birth: date
     password: str
@@ -145,6 +146,7 @@ class TokenData(BaseModel):
 class QueryRequest(BaseModel):
     query: str
     chat_id: str
+    history: list[dict] | None = None
 
 class MessageData(BaseModel):
     chat_id: str
@@ -270,6 +272,7 @@ async def register_user(user: UserRegister):
     user_doc = {
         "name": user.name,
         "email": user.email,
+        "phone_number": user.phone_number,
         "about": user.about,
         "date_of_birth": user.date_of_birth.isoformat(),
         "password_hash": hashed_password,
@@ -307,6 +310,21 @@ async def logout_user(current_user: dict = Depends(get_current_user)):
     # Since JWT is stateless, logout is handled on client side
     return {"message": "Successfully logged out"}
 
+@app.get("/me")
+async def get_current_user_profile(current_user: dict = Depends(get_current_user)):
+    """
+    Get current user profile information.
+    """
+    return {
+        "id": str(current_user["_id"]),
+        "name": current_user.get("name"),
+        "email": current_user.get("email"),
+        "phone_number": current_user.get("phone_number"),
+        "about": current_user.get("about"),
+        "date_of_birth": current_user.get("date_of_birth")
+    }
+
+
 async def sse_token_stream(text: str):
     buff = []
 
@@ -339,9 +357,22 @@ async def stream_sse(request: QueryRequest, current_user: dict = Depends(get_cur
     if not chat:
         await create_chat(str(current_user["_id"]), request.chat_id)
 
+    contents = []
+    if request.history:
+        for msg in request.history:
+            contents.append(types.Content(
+                role=msg.get("role"),
+                parts=[types.Part(text=p) for p in msg.get("parts", [])]
+            ))
+            
+    contents.append(types.Content(
+        role="user",
+        parts=[types.Part(text=request.query.strip())]
+    ))
+
     response = client.models.generate_content(
         model="gemini-2.5-flash-lite",
-        contents=[request.query.strip()],
+        contents=contents,
         config=types.GenerateContentConfig(
             system_instruction="""
             You are a medical expert. Your task is to answer medical questions.
@@ -422,20 +453,78 @@ async def get_chat_data(chat_id: str, current_user: dict = Depends(get_current_u
         "chat_id": chat_id
     }
 
+@app.get("/user/media")
+async def get_user_media(current_user: dict = Depends(get_current_user)):
+    """
+    Retrieve all media files uploaded by the user across all chats.
+    """
+    db = await get_db()
+    
+    # 1. Get all chat IDs for the user
+    user_chats = await db.chats.find(
+        {"user_id": ObjectId(current_user["_id"])},
+        {"_id": 1}
+    ).to_list(length=None)
+    
+    chat_ids = [str(chat["_id"]) for chat in user_chats]
+    
+    if not chat_ids:
+        return {"media_files": []}
+
+    # 2. Find messages in these chats that have media
+    messages = await db.messages.find(
+        {
+            "chat_id": {"$in": chat_ids},
+            "media": {"$ne": None}
+        }
+    ).sort("timestamp", -1).to_list(length=None)
+
+    media_files = []
+    seen_files = set()
+
+    for msg in messages:
+        if msg.get("media"):
+            # Create a unique key to prevent duplicates if references exists
+            # Assuming per-chat unique filenames or global unique? 
+            # In process_image we save to chat specific folder.
+            # But here we just want a list.
+            
+            # Simple deduplication based on filename + chat_id
+            unique_key = f"{msg['chat_id']}_{msg['media']}"
+            if unique_key not in seen_files:
+                media_files.append({
+                    "name": msg["media"],
+                    "chat_id": msg["chat_id"],
+                    "timestamp": msg.get("timestamp")
+                })
+                seen_files.add(unique_key)
+
+    return {"media_files": media_files}
+
 @app.get('/media/{chat_id}/{filename}')
-async def serve_media(chat_id: str, filename: str, current_user: dict = Depends(get_current_user)):
+async def serve_media(chat_id: str, filename: str, token: str):
     """Serve media file for a given chat. Returns FileResponse."""
+    # Manually verify token since we're using query param
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("sub")
+        if user_id is None:
+             raise HTTPException(status_code=401, detail="Invalid authentication credentials")
+    except (jwt.InvalidTokenError, jwt.DecodeError):
+        raise HTTPException(status_code=401, detail="Invalid authentication credentials")
+
     # Verify chat belongs to user
     db = await get_db()
-    chat = await db.chats.find_one({"_id": chat_id, "user_id": ObjectId(current_user["_id"])})
+    chat = await db.chats.find_one({"_id": chat_id, "user_id": ObjectId(user_id)})
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
 
     media_path = MEDIA_DIR / chat_id / filename
     if not media_path.exists():
         raise HTTPException(status_code=404, detail='File not found')
+    
     from fastapi.responses import FileResponse
-    return FileResponse(path=str(media_path), filename=filename)
+    return FileResponse(path=str(media_path), filename=filename, content_disposition_type="inline")
 
 @app.post('/process-image')
 async def process_image(

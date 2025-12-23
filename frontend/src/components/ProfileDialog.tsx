@@ -9,6 +9,7 @@ import { Button } from "./ui/button";
 import { Mail, Phone, MapPin, LogOut, Send } from "lucide-react";
 import { Separator } from "./ui/separator";
 import { useState, useEffect } from "react";
+import { useAuth } from "../contexts/AuthContext";
 
 interface ProfileDialogProps {
   open: boolean;
@@ -17,6 +18,7 @@ interface ProfileDialogProps {
 }
 
 export function ProfileDialog({ open, onOpenChange, onLogout }: ProfileDialogProps) {
+  const { user } = useAuth();
   const [aboutMeText, setAboutMeText] = useState("");
   const [aboutMeSummary, setAboutMeSummary] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -88,11 +90,11 @@ export function ProfileDialog({ open, onOpenChange, onLogout }: ProfileDialogPro
           <div className="flex flex-col items-center space-y-2">
             <Avatar className="w-24 h-24 border-4 border-[#4BA3C3]">
               <AvatarFallback className="bg-[#4BA3C3] text-white text-2xl">
-                DR
+                {user?.name ? user.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : 'U'}
               </AvatarFallback>
             </Avatar>
             <div className="text-center">
-              <h3 className="text-gray-800">Rumaan Zameer</h3>
+              <h3 className="text-gray-800">{user?.name || 'User'}</h3>
               <p className="text-sm text-gray-500">Premium User</p>
             </div>
           </div>
@@ -105,11 +107,11 @@ export function ProfileDialog({ open, onOpenChange, onLogout }: ProfileDialogPro
             <div className="space-y-2">
               <div className="flex items-center gap-3 text-sm text-gray-700">
                 <Mail className="w-4 h-4 text-[#4BA3C3]" />
-                <span>rumaan@sample.com</span>
+                <span>{user?.email || 'N/A'}</span>
               </div>
               <div className="flex items-center gap-3 text-sm text-gray-700">
                 <Phone className="w-4 h-4 text-[#4BA3C3]" />
-                <span>+91 1234567809</span>
+                <span>{user?.phone_number || 'N/A'}</span>
               </div>
               <div className="flex items-center gap-3 text-sm text-gray-700">
                 <MapPin className="w-4 h-4 text-[#4BA3C3]" />

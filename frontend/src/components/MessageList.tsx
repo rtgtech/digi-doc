@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useAuth } from "../contexts/AuthContext";
 import { ScrollArea } from "./ui/scroll-area";
 import { MessageSquare } from "lucide-react";
 import ReactMarkdown from 'react-markdown';
@@ -10,6 +11,7 @@ export interface Message {
   sender: "user" | "bot";
   timestamp: Date;
   media?: string;
+  chatId?: string;
 }
 
 interface MessageListProps {
@@ -17,6 +19,7 @@ interface MessageListProps {
 }
 
 export function MessageList({ messages }: MessageListProps) {
+  const { token } = useAuth();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -74,17 +77,16 @@ export function MessageList({ messages }: MessageListProps) {
               className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"}`}
             >
               <div
-                className={`max-w-[70%] px-4 py-3 rounded-xl shadow-sm ${
-                  message.sender === "user"
+                className={`max-w-[70%] px-4 py-3 rounded-xl shadow-sm ${message.sender === "user"
                     ? "bg-[#EAF4F9] text-gray-800"
                     : "bg-white border border-gray-200 text-gray-800"
-                }`}
+                  }`}
               >
                 {/* If message has media, show filename on top */}
                 {message.media && (
                   <div className="mb-2">
                     <a
-                      href={`http://localhost:8000/media/${(message.id.slice(0, message.id.lastIndexOf('_')) || '')}/${message.media}`}
+                      href={`http://localhost:8000/media/${message.chatId || (message.id.includes('_') ? message.id.slice(0, message.id.lastIndexOf('_')) : '')}/${message.media}?token=${token}`}
                       target="_blank"
                       rel="noreferrer"
                       className="text-xs text-[#4BA3C3] underline break-words"
