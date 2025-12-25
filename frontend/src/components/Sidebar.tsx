@@ -1,5 +1,5 @@
 import { motion } from "motion/react";
-import { Stethoscope, Plus, Image, Menu, X } from "lucide-react";
+import { Stethoscope, Plus, Image, Menu, X, LayoutDashboard } from "lucide-react";
 import { Button } from "./ui/button";
 import { ScrollArea } from "./ui/scroll-area";
 import { Separator } from "./ui/separator";
@@ -18,6 +18,7 @@ interface SidebarProps {
   onProfileClick: () => void;
   onNewChat: () => void;
   onMediaClick: () => void;
+  onDashboardClick: () => void;
   chatHistory: ChatSession[];
   onChatSelect: (chatId: string) => void;
   currentChatId?: string;
@@ -29,6 +30,7 @@ export function Sidebar({
   onProfileClick,
   onNewChat,
   onMediaClick,
+  onDashboardClick,
   chatHistory,
   onChatSelect,
   currentChatId,
@@ -89,6 +91,15 @@ export function Sidebar({
                 <span>New Chat</span>
               </Button>
               <Button
+                onClick={onDashboardClick}
+                variant="outline"
+                className="w-full justify-start gap-3 border-gray-300 hover:bg-[#F9FBFC] rounded-xl cursor-pointer"
+                title="View Dashboard"
+              >
+                <LayoutDashboard className="w-5 h-5" />
+                <span>My Dashboard</span>
+              </Button>
+              <Button
                 onClick={onMediaClick}
                 variant="outline"
                 className="w-full justify-start gap-3 border-gray-300 hover:bg-[#F9FBFC] rounded-xl cursor-pointer"
@@ -106,6 +117,13 @@ export function Sidebar({
                 title="Start a New Chat"
               >
                 <Plus className="w-5 h-5 text-[#4BA3C3]" />
+              </button>
+              <button
+                onClick={onDashboardClick}
+                className="w-full h-12 flex items-center justify-center hover:bg-[#F9FBFC] rounded-xl transition-colors cursor-pointer"
+                title="View Dashboard"
+              >
+                <LayoutDashboard className="w-5 h-5 text-gray-600" />
               </button>
               <button
                 onClick={onMediaClick}

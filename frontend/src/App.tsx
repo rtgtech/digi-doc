@@ -6,6 +6,7 @@ import { ProfileDialog } from "./components/ProfileDialog";
 import { Sidebar } from "./components/Sidebar";
 import type { ChatSession } from "./components/Sidebar";
 import { UploadedMediaDialog } from "./components/UploadedMediaDialog";
+import { Dashboard } from "./components/Dashboard";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { AuthPage } from "./components/AuthPage";
 
@@ -18,6 +19,7 @@ function AppContent() {
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isMediaOpen, setIsMediaOpen] = useState(false);
+  const [currentView, setCurrentView] = useState<"chat" | "dashboard">("chat");
   const [messages, setMessages] = useState<Message[]>([]);
   const [chatHistory, setChatHistory] = useState<ChatSession[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string>("");
@@ -50,7 +52,7 @@ function AppContent() {
         if (!res.ok) return;
         const data = await res.json();
         if (data?.chats) {
-          const sessions: ChatSession[] = data.chats.map((c: any, idx: number) => ({
+          const sessions: ChatSession[] = data.chats.map((c: any) => ({
             id: c.id,
             title: c.title || c.id,
             timestamp: c.last_activity ? new Date(c.last_activity) : new Date(),
@@ -317,12 +319,14 @@ function AppContent() {
     const newChatId = generateChatId();
     setCurrentChatId(newChatId);
     setMessages([]);
+    setCurrentView("chat");
   };
 
   const handleChatSelect = (chatId: string) => {
     // Load messages for selected chat from backend
     const loadChat = async (id: string) => {
       setCurrentChatId(id);
+      setCurrentView("chat");
       try {
         const res = await fetch(`http://localhost:8000/chat-data/${id}`, {
           headers: getAuthHeaders(),
@@ -358,6 +362,7 @@ function AppContent() {
         onToggle={() => setIsSidebarExpanded(!isSidebarExpanded)}
         onProfileClick={() => setIsProfileOpen(true)}
         onNewChat={handleNewChat}
+        onDashboardClick={() => setCurrentView("dashboard")}
         onMediaClick={() => setIsMediaOpen(true)}
         chatHistory={chatHistory}
         onChatSelect={handleChatSelect}
@@ -365,16 +370,22 @@ function AppContent() {
       />
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Message List */}
-        <MessageList messages={messages} />
+      {currentView === "chat" ? (
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Message List */}
+          <MessageList messages={messages} />
 
-        {/* Chat Input */}
-        <ChatInput
-          onSendMessage={handleSendMessage}
-          currentChatId={currentChatId}
-        />
-      </div>
+          {/* Chat Input */}
+          <ChatInput
+            onSendMessage={handleSendMessage}
+            currentChatId={currentChatId}
+          />
+        </div>
+      ) : (
+        <div className="flex-1 overflow-hidden">
+          <Dashboard />
+        </div>
+      )}
 
       {/* Profile Dialog */}
       <ProfileDialog
