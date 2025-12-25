@@ -1,282 +1,149 @@
-# Digital Doctor Chatbot - Implementation Summary
+# Digi-Doc - Implementation Summary
+
+## 📋 Quick Links
+| Section | Purpose |
+|---------|---------|
+| [Overview](#overview) | Project summary and capabilities |
+| [Features](#implemented-features) | Implemented functionality status |
+| [Architecture](#system-architecture) | System design and data flow |
+| [API](#backend-api) | Backend endpoint specifications |
+| [Components](#frontend-components) | Frontend component structure |
+| [Storage](#data-storage) | Data organization and schemas |
+| [Workflows](#user-flow) | User interaction flows |
+| [Development](#development-guide) | Setup and contributing guidelines |
+
+---
 
 ## Overview
-The digital doctor chatbot now has full streaming API integration with persistent storage for messages and media files organized by chat sessions.
+
+**Digi-Doc** is a sophisticated medical AI assistant that has evolved from a local-file-based system to a scalable, database-driven application. It features:
+- ✅ **JWT-based Authentication**: Secure user registration and login.
+- ✅ **MongoDB Integration**: Robust persistence for users, chats, and messages.
+- ✅ **Cloud LLM Integration**: Leveraging **Google Gemini 2.5 Flash** for intelligent medical analysis.
+- ✅ **Local LLM Support**: Optional integration with **Ollama (Gemma 3:1B)**.
+- ✅ **Advanced Media Processing**: OCR for medical images and text extraction from PDFs.
+- ✅ **Real-time Streaming**: Token-by-token response streaming for a responsive feel.
 
 ---
 
-## ✅ Features Implemented
+## Implemented Features
 
-### 1. **Chat Session Management**
-- ✅ **Auto-generated Chat IDs**: Each app session starts with a unique chat ID (`chat_{timestamp}`)
-- ✅ **New Chat Creation**: Users can create new chats via the "New Chat" button
-- ✅ **Chat History**: Previous chats are saved in the sidebar for quick access
-- ✅ **Chat Persistence**: Messages are stored server-side in organized directories
+### 🎯 Core Features
 
-### 2. **Message Streaming**
-- ✅ **Token-by-Token Streaming**: Responses from the LLM stream in real-time
-- ✅ **Message Storage**: Both user and bot messages are automatically saved
-- ✅ **Automatic Saving**: Messages are saved to `APP_DATA/{chat_id}/messages.json`
+#### 1. Authentication & User Management
+| Feature | Status | Details |
+|---------|--------|---------|
+| User Registration | ✅ | Collects medical profile (About Me, DOB, etc.) |
+| Secure Login | ✅ | JWT-based session management |
+| Profile Summary | ✅ | AI-generated bullet points of user background |
+| Protected Routes | ✅ | Frontend & Backend enforcement of auth |
 
-### 3. **Media Upload & Storage**
-- ✅ **File Upload Button**: Plus icon changes to checkmark when file is selected
-- ✅ **File Storage**: Uploaded files are stored in `APP_DATA/{chat_id}/media/`
-- ✅ **Media Browser**: "Uploaded Media" dialog displays all media for current chat
-- ✅ **File Organization**: Files are organized by chat ID automatically
+#### 2. Chat & LLM Interaction
+| Feature | Status | Details |
+|---------|--------|---------|
+| Streaming Responses | ✅ | SSE-based token-by-token delivery |
+| Chat History Context | ✅ | Sends last 10 messages for conversational memory |
+| Smart Title Generation| ✅ | AI generates 3-5 word titles from first response |
+| Session Persistence | ✅ | Saved to MongoDB with owner associations |
 
-### 4. **Folder Structure**
+#### 3. Media Processing (OCR/PDF)
+| Feature | Status | Details |
+|---------|--------|---------|
+| Image Analysis | ✅ | Gemini-powered OCR and medical image summary |
+| PDF Extraction | ✅ | Detailed medical report analysis |
+| Media Gallery | ✅ | View all uploaded files across all user chats |
+| File Serve API | ✅ | Authenticated media retrieval via token |
+
+---
+
+## System Architecture
+
+### Data Flow Diagram
+```mermaid
+graph TD
+    User((User)) <--> Frontend[React/Vite Frontend]
+    Frontend -- "JWT Auth" ----> Backend[FastAPI Backend]
+    Backend <--> MongoDB[(MongoDB)]
+    Backend <--> Gemini[Google Gemini API]
+    Backend <--> Ollama[Ollama Local LLM]
+    Backend <--> Media[Local Media Storage]
 ```
-APP_DATA/
-├── chat_1731234567890/
-│   ├── messages.json          (all messages for this chat)
-│   ├── media/
-│   │   ├── lab_results.pdf
-│   │   ├── xray_scan.jpg
-│   │   └── prescription.pdf
-├── chat_1731234567891/
-│   ├── messages.json
-│   ├── media/
-│   │   └── blood_test.pdf
-└── chat_1731234567892/
-    └── messages.json
-```
+
+### Backend Structure
+The backend is transitioninig to a modular layout in `backend/app/`:
+- `core/`: Configuration, security, and LLM initializations.
+- `db/`: MongoDB client and database connection logic.
+- `routers/`: Authentication, Chat, and Media endpoints.
+- `schemas/`: Pydantic models for request/response validation.
+- `services/`: Business logic for LLM processing and media analysis.
 
 ---
 
-## 🔧 Backend API Endpoints
+## Backend API
 
-### 1. **POST /ask**
-- **Description**: Send query and stream response
-- **Request Body**: 
-  ```json
-  {
-    "query": "user question",
-    "chat_id": "chat_1731234567890"
-  }
-  ```
-- **Response**: Streaming text response (token by token)
-- **Auto-creates**: `APP_DATA/{chat_id}/` directory
+### Authentication
+- `POST /register`: Registers a new user and returns a JWT.
+- `POST /login`: Authenticates user and returns a JWT.
+- `GET /me`: Returns current user profile data.
 
-### 2. **POST /upload**
-- **Description**: Upload media files for a chat
-- **Query Parameters**: `chat_id` (required)
-- **Request**: Multipart form data with file
-- **Response**:
-  ```json
-  {
-    "status": "success",
-    "filename": "document.pdf",
-    "chat_id": "chat_1731234567890",
-    "file_path": "APP_DATA/chat_1731234567890/media/document.pdf"
-  }
-  ```
-- **Auto-creates**: `APP_DATA/{chat_id}/media/` directory
+### Chat Operations
+- `POST /ask_a`: Main streaming chat endpoint with history support.
+- `GET /chats`: Lists all chats belonging to the authenticated user.
+- `GET /chat-data/{chat_id}`: Retrieves full message history and media for a chat.
+- `POST /save-message`: Persists message metadata (user/bot/media references).
+- `POST /update-chat-title`: Manually or automatically update chat titles.
+- `POST /generate-title`: AI utility to suggest titles based on bot responses.
 
-### 3. **POST /save-message**
-- **Description**: Save message metadata to chat
-- **Request Body**:
-  ```json
-  {
-    "chat_id": "chat_1731234567890",
-    "sender": "user|bot",
-    "text": "message content",
-    "timestamp": "2025-11-12T10:30:00Z"
-  }
-  ```
-- **Response**:
-  ```json
-  {
-    "status": "success",
-    "chat_id": "chat_1731234567890"
-  }
-  ```
-
-### 4. **GET /chat-data/{chat_id}**
-- **Description**: Retrieve all messages and media files for a chat
-- **Response**:
-  ```json
-  {
-    "messages": [
-      {"sender": "user", "text": "Hello", "timestamp": "2025-11-12T10:30:00Z"},
-      {"sender": "bot", "text": "Hi, how can I help?", "timestamp": "2025-11-12T10:30:05Z"}
-    ],
-    "media_files": ["lab_results.pdf", "xray_scan.jpg"],
-    "chat_id": "chat_1731234567890"
-  }
-  ```
+### Media Operations
+- `POST /process-image`: Uploads and analyzes images or PDFs using Gemini.
+- `GET /user/media`: Fetches all media uploaded by the user across all sessions.
+- `GET /media/{chat_id}/{filename}`: Serves the physical media file (authenticated).
 
 ---
 
-## 🎨 Frontend Components
+## Frontend Components
+
+### **AuthContext.tsx**
+Manages the global authentication state, storing the JWT in local storage and providing `login`/`logout` functions.
+
+### **AuthPage.tsx**
+Handles both Login and Registration UI, switching between modes dynamically.
+
+### **Dashboard.tsx**
+Provides a central hub for user statistics and overview (future expansion).
 
 ### **App.tsx**
-- Manages app-wide state (messages, chat history, current chat ID)
-- Initializes chat ID on app start using `generateChatId()`
-- Handles message sending with API streaming
-- Manages file uploads to backend
-
-### **ChatInput.tsx**
-- Updated to show file upload indicator (checkmark when file selected)
-- Receives and calls `onFileSelect` handler
-- Passes chat ID context to handlers
-
-### **UploadedMediaDialog.tsx**
-- Fetches media files from backend via `/chat-data/{chat_id}`
-- Displays all uploaded files for current chat
-- Shows file type badges (PDF, JPG, etc.)
-- Auto-loads when dialog opens
-
-### **Sidebar.tsx**
-- Displays chat history
-- Allows switching between saved chats
-- Highlights current active chat
+The main orchestrator. It manages:
+- Real-time SSE streaming for chat.
+- Navigation between chat and dashboard views.
+- Synchronization of chat history and active sessions.
 
 ---
 
-## 🚀 How It Works
+## Data Storage
 
-### **User Flow**
+### MongoDB Schema
+- **Users**: `_id`, `name`, `email`, `password_hash`, `about`, `about_summary`, `date_of_birth`.
+- **Chats**: `_id`, `user_id`, `title`, `created_at`, `updated_at`.
+- **Messages**: `_id`, `chat_id`, `sender`, `text`, `media`, `timestamp`.
 
-1. **App Starts**
-   - Generate unique chat ID: `chat_1731234567890`
-   - Initialize empty messages array
-   - Display welcome screen
-
-2. **User Sends Message**
-   - Message added to local state
-   - Message saved to backend via `/save-message`
-   - Query sent to `/ask` endpoint with chat_id
-   - Response streams token-by-token
-   - UI updates in real-time
-   - Bot response saved to backend
-
-3. **User Uploads Media**
-   - Click Plus button to select file
-   - Icon changes to checkmark
-   - File uploaded to `/upload?chat_id={current_chat_id}`
-   - File stored in `APP_DATA/{chat_id}/media/`
-   - Success confirmation logged
-
-4. **View Uploaded Media**
-   - Click "Uploaded Media" button
-   - Dialog fetches files via `/chat-data/{chat_id}`
-   - All files displayed with file type indicators
-   - User can see file names and types
-
-5. **New Chat**
-   - Click "New Chat" button
-   - Current chat saved to history
-   - New chat ID generated
-   - Messages cleared
-   - Ready for new conversation
+### Media Assets
+Stored locally in the `backend/MEDIA/{chat_id}/` directory. Files are referenced in the `Messages` collection in MongoDB.
 
 ---
 
-## 📝 Configuration
+## Development Guide
 
-### Backend Setup (temp2.py → api.py)
-```python
-# API runs on localhost:8000
-# CORS enabled for all origins
-# Creates APP_DATA directory automatically
-# Uses Ollama LLM (llama3.2:3b)
-# Retrieves context from vector store
+### Prerequisites
+- **Python 3.10+**
+- **Node.js 18+**
+- **MongoDB** (Local or Cloud instance)
+- **Ollama** (Optional, for local Gemma models)
+
+### Environment Variables (`backend/.env`)
+```env
+GEMINI_API_KEY=your_key
+MONGODB_URL=mongodb://localhost:27017
+SECRET_KEY=your_jwt_secret
 ```
-
-### Frontend Setup (App.tsx)
-```typescript
-// API base URL
-const API_URL = 'http://localhost:8000';
-
-// Auto-generate chat ID format
-function generateChatId(): string {
-  return `chat_${Date.now()}`;
-}
-```
-
----
-
-## 🔄 API Request/Response Flow
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    User sends message                        │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-        ┌────────────────▼─────────────────┐
-        │ Save user message via /save-msg  │
-        └────────────────┬─────────────────┘
-                         │
-        ┌────────────────▼──────────────────────┐
-        │ POST /ask with query + chat_id        │
-        │ Opens streaming reader                │
-        └────────────────┬─────────────────────┘
-                         │
-        ┌────────────────▼──────────────────┐
-        │ Stream chunks received token-by-token│
-        │ UI updates in real-time            │
-        └────────────────┬───────────────────┘
-                         │
-        ┌────────────────▼──────────────────────┐
-        │ Save bot response via /save-message   │
-        │ Message stored in chat dir           │
-        └──────────────────────────────────────┘
-```
-
----
-
-## 🐛 Error Handling
-
-- ✅ Network errors caught and displayed
-- ✅ File upload failures logged to console
-- ✅ Missing chat ID validation on backend
-- ✅ Empty message validation
-- ✅ Graceful fallback messages
-
----
-
-## 📦 Files Modified/Created
-
-### Modified Files:
-- `src/App.tsx` - Chat ID management, message streaming, file upload
-- `src/components/ChatInput.tsx` - File upload indicator UI
-- `src/components/UploadedMediaDialog.tsx` - Dynamic media fetching
-
-### New Files:
-- `api.py` - Complete backend API with file storage
-
----
-
-## 🚦 Testing Checklist
-
-- [ ] Start app - verify initial chat ID is generated
-- [ ] Send message - verify streaming response appears
-- [ ] Check APP_DATA folder - verify messages.json created
-- [ ] Upload file - verify file stored in media/ folder
-- [ ] View media dialog - verify files display correctly
-- [ ] New chat - verify new chat ID and folder created
-- [ ] Switch chats - verify previous messages load correctly
-- [ ] Check folder structure - verify APP_DATA/{chat_id}/ format
-
----
-
-## 🔐 Security Notes
-
-- Backend allows all origins (CORS) - restrict in production
-- No authentication implemented - add in production
-- Files stored locally without validation - add file type validation
-- Message content not encrypted - add encryption if needed
-
----
-
-## 🎯 Next Steps (Optional Enhancements)
-
-- [ ] Add message editing/deletion
-- [ ] Add chat export (PDF/JSON)
-- [ ] Add file preview in media dialog
-- [ ] Add message search/filtering
-- [ ] Add user authentication
-- [ ] Add chat sharing
-- [ ] Add rate limiting
-- [ ] Add message encryption
 

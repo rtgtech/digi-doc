@@ -1,100 +1,91 @@
 # Digi-Doc Documentation
 
+## 📋 Table of Contents
+1. [Project Overview](#project-overview)
+2. [Technology Stack](#technology-stack)
+3. [Quick Start](#quick-start)
+4. [Project Structure](#project-structure)
+5. [Core Features](#core-features)
+6. [API Reference](#api-reference)
+7. [Troubleshooting](#troubleshooting)
+8. [Contributing](#contributing)
+
+---
+
 ## Project Overview
-Digi-Doc is an AI-powered medical assistant designed to help users with medical queries. It leverages Large Language Models (LLMs) like Llama 3.2 (via Ollama) and Google Gemini to provide intelligent responses. The application also supports media uploads (PDFs and Images) for OCR (Optical Character Recognition) and summarization of medical reports.
+
+**Digi-Doc** is an AI-powered medical chatbot assistant designed to help users with medical queries, report analysis, and health document management. It features a secure user system, cloud-based LLM analysis, and local persistence for sensitive medical data.
+
+### Key Capabilities
+- 💬 **Medical AI Chat**: Context-aware conversations using **Google Gemini 2.5 Flash**.
+- 🔐 **Secure Access**: JWT-based authentication for private medical history.
+- 📄 **Report Analysis**: Extract and summarize data from PDFs and medical images (OCR).
+- 📊 **Health Dashboard**: Centralized view of your medical data and activity.
+- 💾 **Persistent History**: All conversations and media are stored in a secure MongoDB database.
+
+---
 
 ## Technology Stack
 
 ### Backend
-- **Framework**: [FastAPI](https://fastapi.tiangolo.com/)
-- **Language**: Python 3.10+
-- **AI/LLM**:
-    - [LangChain](https://python.langchain.com/) (Orchestration)
-    - [Ollama](https://ollama.com/) (Local LLM: `llama3.2:3b`)
-    - [Google Gemini](https://ai.google.dev/) (Cloud LLM: `gemini-2.5-flash`)
-- **Media Processing**:
-    - [PyMuPDF (fitz)](https://pymupdf.readthedocs.io/) for PDF text extraction.
-    - [Pillow (PIL)](https://python-pillow.org/) & [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) for image text extraction.
-- **Data Storage**: Local JSON files in `APP_DATA/` directory.
+| Component | Technology |
+|-----------|-----------|
+| **Framework** | [FastAPI](https://fastapi.tiangolo.com/) |
+| **Language** | Python 3.10+ |
+| **Database** | [MongoDB](https://www.mongodb.com/) (Motor/Async) |
+| **Cloud LLM** | [Google Gemini](https://ai.google.dev/) (2.5 Flash Lite) |
+| **Local LLM** | [Ollama](https://ollama.com/) (Gemma 3:1B) |
+| **Auth** | JWT (PyJWT) + Passlib (bcrypt) |
+| **Media** | PyMuPDF (fitz) + Pillow (PIL) |
 
 ### Frontend
-- **Framework**: [React](https://react.dev/) (v19)
-- **Build Tool**: [Vite](https://vitejs.dev/)
-- **Language**: TypeScript
-- **Styling**: [Tailwind CSS](https://tailwindcss.com/)
-- **UI Components**: [Radix UI](https://www.radix-ui.com/) & [Lucide React](https://lucide.dev/) (Icons)
-- **Animations**: [Framer Motion](https://www.framer.com/motion/)
+| Component | Technology |
+|-----------|-----------|
+| **Framework** | [React](https://react.dev/) (v19) + [Vite](https://vitejs.dev/) |
+| **Language** | TypeScript |
+| **Styling** | [Tailwind CSS](https://tailwindcss.com/) |
+| **UI Components** | [Radix UI](https://www.radix-ui.com/) + [Lucide Icons](https://lucide.dev/) |
+| **Animations** | [Framer Motion](https://www.framer.com/motion/) |
 
 ---
 
-## Prerequisites
+## Quick Start
 
-Before setting up the project, ensure you have the following installed:
+### Prerequisites
+1. **Python 3.10+**
+2. **Node.js 18+**
+3. **MongoDB** (Running on `localhost:27017` or cloud URI)
+4. **Gemini API Key** (Get one from [Google AI Studio](https://aistudio.google.com/))
 
-1.  **Python 3.10+**: [Download Python](https://www.python.org/downloads/)
-2.  **Node.js 18+**: [Download Node.js](https://nodejs.org/)
-3.  **Ollama**: [Download Ollama](https://ollama.com/)
-    - Pull the required model: `ollama pull llama3.2:3b`
-4.  **Tesseract OCR**:
-    - **Windows**: [Download Installer](https://github.com/UB-Mannheim/tesseract/wiki) (Add to PATH)
-    - **Linux**: `sudo apt-get install tesseract-ocr`
-    - **macOS**: `brew install tesseract`
+### Installation
 
----
+#### 1. Backend Setup
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate  # venv\Scripts\activate on Windows
+pip install -r requirements.txt
+```
 
-## Installation & Setup
+Create a `.env` file in the `backend/` directory:
+```env
+GEMINI_API_KEY=your_key_here
+MONGODB_URL=mongodb://localhost:27017
+SECRET_KEY=your_random_secret_string
+```
 
-### 1. Backend Setup
+Start the API server:
+```bash
+uvicorn digidoc_app:app --reload
+```
 
-1.  Navigate to the backend directory:
-    ```bash
-    cd backend
-    ```
-
-2.  Create a virtual environment:
-    ```bash
-    python -m venv venv
-    ```
-
-3.  Activate the virtual environment:
-    - **Windows**: `venv\Scripts\activate`
-    - **macOS/Linux**: `source venv/bin/activate`
-
-4.  Install dependencies:
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-5.  Set up environment variables:
-    - Create a `.env` file in the `backend/` directory.
-    - Add your Google Gemini API key:
-      ```env
-      GEMINI_API_KEY=your_api_key_here
-      ```
-
-6.  Run the server:
-    ```bash
-    uvicorn digidoc_app:app --reload
-    ```
-    The API will be available at `http://localhost:8000`.
-
-### 2. Frontend Setup
-
-1.  Navigate to the frontend directory:
-    ```bash
-    cd frontend
-    ```
-
-2.  Install dependencies:
-    ```bash
-    npm install
-    ```
-
-3.  Run the development server:
-    ```bash
-    npm run dev
-    ```
-    The application will be available at `http://localhost:5173` (or the port shown in the terminal).
+#### 2. Frontend Setup
+```bash
+cd frontend
+npm install
+npm run dev
+```
+Open `http://localhost:5173` in your browser.
 
 ---
 
@@ -103,71 +94,75 @@ Before setting up the project, ensure you have the following installed:
 ```
 Digi-Doc/
 ├── backend/
-│   ├── APP_DATA/           # Stores chat history, media, and metadata (Local DB)
-│   ├── digidoc_app.py      # Main FastAPI application entry point
-│   ├── requirements.txt    # Python dependencies
-│   └── .env                # Environment variables (API Keys)
+│   ├── app/                # Modular application core
+│   │   ├── core/           # Security, Config, LLM Init
+│   │   ├── db/             # MongoDB Client
+│   │   ├── routers/        # API Endpoints (Auth, Chat, Media)
+│   │   └── schemas/        # Request/Response validation
+│   ├── MEDIA/              # Local storage for uploaded documents
+│   ├── digidoc_app.py      # Main entry point (FastAPI)
+│   └── requirements.txt    # Python dependencies
 ├── frontend/
 │   ├── src/
-│   │   ├── components/     # React UI components (ChatInput, MessageList, etc.)
-│   │   ├── App.tsx         # Main React component
-│   │   └── main.tsx        # Entry point
-│   ├── package.json        # Node.js dependencies
-│   └── vite.config.ts      # Vite configuration
-└── DOCUMENTATION.md        # This file
+│   │   ├── components/     # UI Components (Auth, Chat, Dashboard)
+│   │   ├── contexts/       # Global State (AuthContext)
+│   │   ├── assets/         # Static images/CSS
+│   │   └── App.tsx         # Root Application Logic
+│   └── tailwind.config.js
+├── ChangeLog.md            # History of changes
+├── DOCUMENTATION.md        # This file
+└── IMPLEMENTATION_SUMMARY.md # Deep technical details
 ```
 
 ---
 
-## Key Features & Usage
+## Core Features
 
-### 1. Medical Chat
-- **Ask a Question**: Type your medical query in the chat input.
-- **Streaming Responses**: The bot streams responses token-by-token for a real-time experience.
-- **AI Models**: Uses Google Gemini for general queries (`/ask_a`) and Ollama for local processing.
+### 1. Secure Authentication
+Users must register and login to access the chatbot. This ensures that medical history and uploaded files remain private.
 
-### 2. Media Analysis
-- **Upload**: Click the attachment icon to upload a PDF report or a medical image (X-Ray, prescription, etc.).
-- **Processing**:
-    - **PDFs**: Text is extracted using PyMuPDF.
-    - **Images**: Text is extracted using Tesseract OCR.
-- **Summarization**: The extracted text is sent to the LLM (Ollama) to generate a patient-friendly summary.
+### 2. Intelligent Medical Assistant
+- **Streamed Conversations**: Responses appear word-by-word for a natural feel.
+- **Contextual Memory**: The bot "remembers" the last 10 messages in a session.
+- **Smart Titles**: Chats are automatically named based on the first few sentences of the bot's response.
 
-### 3. Chat History
-- **Sessions**: Previous chat sessions are saved and listed in the sidebar.
-- **Persistence**: Messages and uploaded files are stored locally in `backend/APP_DATA/`.
-
-### 4. User Profile
-- **About Me**: Users can save their medical history or personal details, which are summarized and stored for context.
+### 3. Medical Document Analysis
+- **PDF Uploads**: Upload prescriptions or lab results for analysis.
+- **Image OCR**: Upload X-rays or handwritten notes for text extraction and summary.
+- **Integrated View**: See all your uploaded media in the Sidebar gallery.
 
 ---
 
-## API Endpoints
+## API Reference
 
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `POST` | `/ask_a` | Streams a response from Google Gemini for a medical query. |
-| `POST` | `/process-image` | Uploads a file, extracts text (OCR/PDF), and streams a summary. |
-| `POST` | `/save-message` | Saves a user or bot message to the local JSON storage. |
-| `GET` | `/chats` | Lists all chat sessions with metadata. |
-| `GET` | `/chat-data/{id}` | Retrieves messages and media for a specific chat ID. |
-| `GET` | `/media/{id}/{file}` | Serves uploaded media files. |
+### Auth Endpoints
+- `POST /register`: Payload: `{name, email, phone_number, about, date_of_birth, password}`
+- `POST /login`: Payload: `{email, password}`
+- `GET /me`: Returns logged-in user details.
+
+### Chat Endpoints
+- `POST /ask_a`: Send `{query, chat_id, history}` for a streaming response.
+- `GET /chats`: List all chat sessions for the user.
+- `GET /chat-data/{chat_id}`: Fetch all messages and media for a specific session.
+- `POST /generate-title`: Request `{response}` to get a 3-5 word title suggestion.
 
 ---
 
 ## Troubleshooting
 
-- **Ollama Connection Error**: Ensure Ollama is running (`ollama serve`) and the model `llama3.2:3b` is pulled.
-- **Tesseract Not Found**: Ensure Tesseract is installed and added to your system's PATH.
-- **Gemini API Error**: Check if `GEMINI_API_KEY` is correctly set in `backend/.env`.
-- **CORS Issues**: If the frontend cannot talk to the backend, ensure `CORSMiddleware` in `digidoc_app.py` allows the frontend origin.
+| Issue | Solution |
+|-------|----------|
+| **MongoDB Connection Failure** | Ensure MongoDB is running locally or check your `MONGODB_URL` in `.env`. |
+| **Gemini API Key Error** | Check that `GEMINI_API_KEY` is correctly set in your `.env`. |
+| **CORS Errors** | Ensure the frontend URL (`localhost:5173`) matches the `allow_origins` in `digidoc_app.py`. |
+| **Media Upload Issues** | Check write permissions for the `backend/MEDIA` directory. |
 
 ---
 
 ## Contributing
 
-1.  Fork the repository.
-2.  Create a feature branch (`git checkout -b feature/AmazingFeature`).
-3.  Commit your changes (`git commit -m 'Add some AmazingFeature'`).
-4.  Push to the branch (`git push origin feature/AmazingFeature`).
-5.  Open a Pull Request.
+1. Fork the repo.
+2. Create your feature branch (`git checkout -b feature/CoolFeature`).
+3. Commit your changes (`git commit -m 'Add CoolFeature'`).
+4. Push to the branch (`git push origin feature/CoolFeature`).
+5. Open a Pull Request.
