@@ -49,9 +49,9 @@ export function ChatInput({ onSendMessage }: ChatInputProps) {
   };
 
   const handleMicClick = () => {
-    if (!message.trim()) {
-      setIsRecording(!isRecording);
-    }
+    // if (!message.trim()) {
+    //   setIsRecording(!isRecording);
+    // }
   };
 
   const handleRestoreInput = () => {
@@ -184,7 +184,7 @@ export function ChatInput({ onSendMessage }: ChatInputProps) {
               {message.trim() ? (
                 <Send className="w-5 h-5 text-white" />
               ) : (
-                <Mic className="w-5 h-5 text-white" />
+                <Send className="w-5 h-5 text-white" />
               )}
             </button>
           </div>

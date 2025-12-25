@@ -75,14 +75,14 @@ export function ProfileDialog({ open, onOpenChange, onLogout }: ProfileDialogPro
       <DialogContent className="sm:max-w-md max-h-[80vh] overflow-y-auto">
         <DialogHeader className="relative">
           <DialogTitle>Profile</DialogTitle>
-          <Button
+          {/* <Button
             onClick={handleSaveAboutMe}
             disabled={isLoading}
             className="absolute top-2 right-2 gap-2 bg-[#4BA3C3] hover:bg-[#2A9D8F] h-8 px-3 text-sm cursor-pointer"
           >
             <Send className="w-4 h-4" />
             About me
-          </Button>
+          </Button> */}
         </DialogHeader>
 
         <div className="flex flex-col space-y-4 py-4">
@@ -123,7 +123,7 @@ export function ProfileDialog({ open, onOpenChange, onLogout }: ProfileDialogPro
           <Separator />
 
           {/* About Me Section */}
-          <div className="space-y-3">
+          {/* <div className="space-y-3">
             <p className="text-xs font-semibold text-gray-600 uppercase">About You</p>
             <div className="flex gap-2">
               <textarea
@@ -141,7 +141,7 @@ export function ProfileDialog({ open, onOpenChange, onLogout }: ProfileDialogPro
                 <Send className="w-4 h-4" />
               </button>
             </div>
-          </div>
+          </div> */}
 
           {/* About Me Summary Display */}
           {aboutMeSummary && (
@@ -153,7 +153,7 @@ export function ProfileDialog({ open, onOpenChange, onLogout }: ProfileDialogPro
             </div>
           )}
 
-          <Separator />
+          {/* <Separator /> */}
 
           {/* Sign Out Button */}
           <Button
