@@ -69,7 +69,7 @@ export function Sidebar({
                 transition={{ delay: 0.1 }}
                 className="text-[#2A9D8F]"
               >
-                Digital Docter
+                Digital Doctor
               </motion.span>
             )}
           </div>

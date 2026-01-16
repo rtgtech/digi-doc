@@ -4,6 +4,14 @@
 
 ---
 
+# Architecture
+
+> [Architecture](ARCHITECTURE.md)
+
+> [Simplified Architecture](SIMPLE_ARCHITECTURE.md)
+
+
+
 ## 🚀 Key Capabilities
 
 - **💬 Intelligent Medical Chat**: Get accurate, context-aware answers to medical queries in real-time.

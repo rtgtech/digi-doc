@@ -6,9 +6,9 @@ import {
 } from "./ui/dialog";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import { Button } from "./ui/button";
-import { Mail, Phone, MapPin, LogOut, Send } from "lucide-react";
+import { Mail, Phone, MapPin, LogOut } from "lucide-react";
 import { Separator } from "./ui/separator";
-import { useState, useEffect } from "react";
+//import { useState, useEffect } from "react";
 import { useAuth } from "../contexts/AuthContext";
 
 interface ProfileDialogProps {
@@ -19,56 +19,11 @@ interface ProfileDialogProps {
 
 export function ProfileDialog({ open, onOpenChange, onLogout }: ProfileDialogProps) {
   const { user } = useAuth();
-  const [aboutMeText, setAboutMeText] = useState("");
-  const [aboutMeSummary, setAboutMeSummary] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  //const [aboutMeText, setAboutMeText] = useState("");
+  //const [aboutMeSummary, setAboutMeSummary] = useState("");
+  //const [isLoading, setIsLoading] = useState(false);
 
   // Fetch stored about-me on dialog open
-  useEffect(() => {
-    if (open) {
-      fetchAboutMe();
-    }
-  }, [open]);
-
-  const fetchAboutMe = async () => {
-    try {
-      const res = await fetch('http://localhost:8000/get-about-me');
-      if (res.ok) {
-        const data = await res.json();
-        setAboutMeText(data.original_text || "");
-        setAboutMeSummary(data.summary || "");
-      }
-    } catch (err) {
-      console.error('Error fetching about-me:', err);
-    }
-  };
-
-  const handleSaveAboutMe = async () => {
-    if (!aboutMeText.trim()) {
-      alert("Please write something about yourself");
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      const res = await fetch('http://localhost:8000/summarize-about-me', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: aboutMeText }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        setAboutMeSummary(data.summary);
-        alert("About me saved successfully!");
-      }
-    } catch (err) {
-      console.error('Error saving about-me:', err);
-      alert("Failed to save about me");
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -121,39 +76,6 @@ export function ProfileDialog({ open, onOpenChange, onLogout }: ProfileDialogPro
           </div>
 
           <Separator />
-
-          {/* About Me Section */}
-          {/* <div className="space-y-3">
-            <p className="text-xs font-semibold text-gray-600 uppercase">About You</p>
-            <div className="flex gap-2">
-              <textarea
-                value={aboutMeText}
-                onChange={(e) => setAboutMeText(e.target.value)}
-                placeholder="Tell me about yourself..."
-                className="flex-1 h-24 p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#4BA3C3] resize-none"
-              />
-              <button
-                onClick={handleSaveAboutMe}
-                disabled={isLoading}
-                className="flex-shrink-0 w-10 h-10 flex items-center justify-center bg-[#4BA3C3] hover:bg-[#2A9D8F] text-white rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
-                title="Send"
-              >
-                <Send className="w-4 h-4" />
-              </button>
-            </div>
-          </div> */}
-
-          {/* About Me Summary Display */}
-          {aboutMeSummary && (
-            <div className="space-y-2 bg-[#F9FBFC] p-4 rounded-lg">
-              <p className="text-xs font-semibold text-gray-600 uppercase">Your Summary</p>
-              <div className="prose prose-sm max-w-none text-sm text-gray-700 whitespace-pre-line">
-                {aboutMeSummary}
-              </div>
-            </div>
-          )}
-
-          {/* <Separator /> */}
 
           {/* Sign Out Button */}
           <Button
