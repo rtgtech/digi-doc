@@ -371,7 +371,7 @@ async def stream_sse(request: QueryRequest, current_user: dict = Depends(get_cur
     ))
 
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-2.5-flash", #change model as required as models can get deprecated
         contents=contents,
         config=types.GenerateContentConfig(
             system_instruction="""
